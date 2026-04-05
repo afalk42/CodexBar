@@ -50,6 +50,8 @@ public enum ProviderConfigEnvironment {
             if let key = DoubaoSettingsReader.apiKeyEnvironmentKeys.first {
                 env[key] = apiKey
             }
+        case .bedrock:
+            env[BedrockSettingsReader.apiKeyEnvKey] = apiKey
         default:
             break
         }

@@ -206,7 +206,8 @@ struct TokenAccountCLIContext {
                     manualToken: cookieHeader ?? "",
                     username: config?.sanitizedAPIKey ?? "",
                     password: ""))
-        default:
+        case .gemini, .antigravity, .copilot, .kiro, .vertexai, .kimik2, .synthetic, .openrouter, .warp,
+             .deepseek, .codebuff, .crof, .venice, .commandcode, .bedrock:
             return nil
         }
     }

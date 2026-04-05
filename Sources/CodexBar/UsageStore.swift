@@ -976,7 +976,7 @@ extension UsageStore {
                         hasTokenAccount: deepSeekHasTokenAccount)
                 case .gemini, .antigravity, .opencode, .opencodego, .factory, .copilot, .vertexai, .kilo, .kiro, .kimi,
                      .kimik2, .jetbrains, .perplexity, .mimo, .doubao, .abacus, .mistral, .codebuff, .crof, .windsurf,
-                     .venice, .commandcode, .stepfun:
+                     .venice, .commandcode, .stepfun, .bedrock:
                     return unimplementedDebugLogMessages[provider] ?? "Debug log not yet implemented"
                 }
             }
