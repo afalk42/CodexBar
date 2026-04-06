@@ -216,9 +216,20 @@ struct BedrockUsageStatsTests {
                 "ResultsByTime": [
                     {
                         "TimePeriod": {"Start": "2026-04-01", "End": "2026-04-06"},
-                        "Total": {
-                            "UnblendedCost": {"Amount": "42.50", "Unit": "USD"}
-                        }
+                        "Groups": [
+                            {
+                                "Keys": ["Claude Opus 4.6 (Bedrock Edition)"],
+                                "Metrics": {"UnblendedCost": {"Amount": "30.00", "Unit": "USD"}}
+                            },
+                            {
+                                "Keys": ["Claude Sonnet 4.6 (Bedrock Edition)"],
+                                "Metrics": {"UnblendedCost": {"Amount": "12.50", "Unit": "USD"}}
+                            },
+                            {
+                                "Keys": ["Amazon EC2"],
+                                "Metrics": {"UnblendedCost": {"Amount": "5.00", "Unit": "USD"}}
+                            }
+                        ]
                     }
                 ]
             }
