@@ -32,7 +32,13 @@ public enum ProviderConfigEnvironment {
         case .openrouter:
             env[OpenRouterSettingsReader.envKey] = apiKey
         case .bedrock:
-            env[BedrockSettingsReader.apiKeyEnvKey] = apiKey
+            env[BedrockSettingsReader.accessKeyIDKey] = apiKey
+            if let secret = config?.sanitizedCookieHeader, !secret.isEmpty {
+                env[BedrockSettingsReader.secretAccessKeyKey] = secret
+            }
+            if let region = config?.region, !region.isEmpty {
+                env[BedrockSettingsReader.regionKeys[0]] = region
+            }
         default:
             break
         }
