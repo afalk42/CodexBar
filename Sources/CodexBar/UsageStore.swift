@@ -1293,7 +1293,7 @@ extension UsageStore {
     }
 
     private func refreshTokenUsage(_ provider: UsageProvider, force: Bool) async {
-        guard provider == .codex || provider == .claude || provider == .vertexai else {
+        guard provider == .codex || provider == .claude || provider == .vertexai || provider == .bedrock else {
             self.tokenSnapshots.removeValue(forKey: provider)
             self.tokenErrors[provider] = nil
             self.tokenFailureGates[provider]?.reset()
@@ -1338,6 +1338,11 @@ extension UsageStore {
         do {
             let fetcher = self.costUsageFetcher
             let timeoutSeconds = self.tokenFetchTimeout
+            let providerEnvironment = ProviderConfigEnvironment.applyAPIKeyOverride(
+                base: self.environmentBase,
+                provider: provider,
+                config: self.settings.providerConfig(for: provider))
+            let allowVertexClaudeFallback = !self.isEnabled(.claude)
             // CostUsageFetcher scans local Codex session logs from this machine. That data is
             // intentionally presented as provider-level local telemetry rather than managed-account
             // remote state, so managed Codex account selection does not retarget this fetch.
@@ -1347,9 +1352,10 @@ extension UsageStore {
                 group.addTask(priority: .utility) {
                     try await fetcher.loadTokenSnapshot(
                         provider: provider,
+                        environment: providerEnvironment,
                         now: now,
                         forceRefresh: force,
-                        allowVertexClaudeFallback: !self.isEnabled(.claude))
+                        allowVertexClaudeFallback: allowVertexClaudeFallback)
                 }
                 group.addTask {
                     try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))

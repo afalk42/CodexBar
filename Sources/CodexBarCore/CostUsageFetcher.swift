@@ -22,12 +22,14 @@ public struct CostUsageFetcher: Sendable {
 
     public func loadTokenSnapshot(
         provider: UsageProvider,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         now: Date = Date(),
         forceRefresh: Bool = false,
         allowVertexClaudeFallback: Bool = false) async throws -> CostUsageTokenSnapshot
     {
         try await Self.loadTokenSnapshot(
             provider: provider,
+            environment: environment,
             now: now,
             forceRefresh: forceRefresh,
             allowVertexClaudeFallback: allowVertexClaudeFallback)
@@ -35,6 +37,7 @@ public struct CostUsageFetcher: Sendable {
 
     static func loadTokenSnapshot(
         provider: UsageProvider,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         now: Date = Date(),
         forceRefresh: Bool = false,
         allowVertexClaudeFallback: Bool = false,
@@ -42,13 +45,21 @@ public struct CostUsageFetcher: Sendable {
         piScannerOptions overridePiScannerOptions: PiSessionCostScanner
             .Options? = nil) async throws -> CostUsageTokenSnapshot
     {
-        guard provider == .codex || provider == .claude || provider == .vertexai else {
-            throw CostUsageError.unsupportedProvider(provider)
-        }
-
         let until = now
         // Rolling window: last 30 days (inclusive). Use -29 for inclusive boundaries.
         let since = Calendar.current.date(byAdding: .day, value: -29, to: now) ?? now
+
+        if provider == .bedrock {
+            return try await Self.loadBedrockTokenSnapshot(
+                environment: environment,
+                since: since,
+                until: until,
+                now: now)
+        }
+
+        guard provider == .codex || provider == .claude || provider == .vertexai else {
+            throw CostUsageError.unsupportedProvider(provider)
+        }
 
         var options = overrideScannerOptions ?? CostUsageScanner.Options()
         if provider == .vertexai {
@@ -97,6 +108,32 @@ public struct CostUsageFetcher: Sendable {
                 options: piOptions)
             daily = CostUsageDailyReport.merged([daily, piReport])
         }
+
+        return Self.tokenSnapshot(from: daily, now: now)
+    }
+
+    private static func loadBedrockTokenSnapshot(
+        environment: [String: String],
+        since: Date,
+        until: Date,
+        now: Date) async throws -> CostUsageTokenSnapshot
+    {
+        guard let accessKeyID = BedrockSettingsReader.accessKeyID(environment: environment),
+              let secretAccessKey = BedrockSettingsReader.secretAccessKey(environment: environment)
+        else {
+            throw BedrockUsageError.missingCredentials
+        }
+
+        let credentials = BedrockAWSSigner.Credentials(
+            accessKeyID: accessKeyID,
+            secretAccessKey: secretAccessKey,
+            sessionToken: BedrockSettingsReader.sessionToken(environment: environment))
+
+        let daily = try await BedrockUsageFetcher.fetchDailyReport(
+            credentials: credentials,
+            since: since,
+            until: until,
+            environment: environment)
 
         return Self.tokenSnapshot(from: daily, now: now)
     }
