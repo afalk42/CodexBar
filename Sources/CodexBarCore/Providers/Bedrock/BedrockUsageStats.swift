@@ -144,17 +144,23 @@ struct BedrockUsageFetcher: Sendable {
         region: String,
         environment: [String: String]) async throws -> Double
     {
+        // Cost Explorer is a global service; always use us-east-1 regardless of the
+        // user's Bedrock region.
+        let ceRegion = "us-east-1"
         let baseURL: URL
         if let override = environment[BedrockSettingsReader.apiURLKey],
            let url = URL(string: BedrockSettingsReader.cleaned(override) ?? "")
         {
             baseURL = url
         } else {
-            baseURL = URL(string: "https://ce.\(region).amazonaws.com")!
+            baseURL = URL(string: "https://ce.\(ceRegion).amazonaws.com")!
         }
 
         let (startDate, endDate) = Self.currentMonthRange()
 
+        // Use GroupBy to get per-service costs, then filter client-side for Bedrock
+        // services. AWS names them per-model (e.g. "Claude Opus 4.6 (Bedrock Edition)")
+        // so exact-match filters don't work reliably.
         let requestBody: [String: Any] = [
             "TimePeriod": [
                 "Start": startDate,
@@ -162,11 +168,8 @@ struct BedrockUsageFetcher: Sendable {
             ],
             "Granularity": "MONTHLY",
             "Metrics": ["UnblendedCost"],
-            "Filter": [
-                "Dimensions": [
-                    "Key": "SERVICE",
-                    "Values": ["Amazon Bedrock", "Amazon Bedrock Runtime"],
-                ],
+            "GroupBy": [
+                ["Type": "DIMENSION", "Key": "SERVICE"],
             ],
         ]
 
@@ -184,7 +187,7 @@ struct BedrockUsageFetcher: Sendable {
         BedrockAWSSigner.sign(
             request: &request,
             credentials: credentials,
-            region: region,
+            region: ceRegion,
             service: "ce")
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -211,12 +214,20 @@ struct BedrockUsageFetcher: Sendable {
 
         var totalCost = 0.0
         for result in results {
-            if let total = result["Total"] as? [String: Any],
-               let unblended = total["UnblendedCost"] as? [String: Any],
-               let amountStr = unblended["Amount"] as? String,
-               let amount = Double(amountStr)
-            {
-                totalCost += amount
+            guard let groups = result["Groups"] as? [[String: Any]] else { continue }
+            for group in groups {
+                guard let keys = group["Keys"] as? [String],
+                      let serviceName = keys.first,
+                      serviceName.localizedCaseInsensitiveContains("Bedrock")
+                else { continue }
+
+                if let metrics = group["Metrics"] as? [String: Any],
+                   let unblended = metrics["UnblendedCost"] as? [String: Any],
+                   let amountStr = unblended["Amount"] as? String,
+                   let amount = Double(amountStr)
+                {
+                    totalCost += amount
+                }
             }
         }
 
