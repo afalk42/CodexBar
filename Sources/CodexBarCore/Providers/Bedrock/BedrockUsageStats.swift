@@ -189,13 +189,12 @@ struct BedrockUsageFetcher: Sendable {
     {
         // Cost Explorer is a global service; always use us-east-1.
         let ceRegion = "us-east-1"
-        let baseURL: URL
-        if let override = environment[BedrockSettingsReader.apiURLKey],
-           let url = URL(string: BedrockSettingsReader.cleaned(override) ?? "")
+        let baseURL: URL = if let override = environment[BedrockSettingsReader.apiURLKey],
+                              let url = URL(string: BedrockSettingsReader.cleaned(override) ?? "")
         {
-            baseURL = url
+            url
         } else {
-            baseURL = URL(string: "https://ce.\(ceRegion).amazonaws.com")!
+            URL(string: "https://ce.\(ceRegion).amazonaws.com")!
         }
 
         // Use GroupBy to get per-service costs, then filter client-side for Bedrock
@@ -390,7 +389,8 @@ public enum BedrockUsageError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .missingCredentials:
-            "AWS credentials not configured. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables or configure in Settings."
+            "AWS credentials not configured. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables "
+                + "or configure in Settings."
         case let .networkError(message):
             "AWS Bedrock network error: \(message)"
         case let .apiError(message):

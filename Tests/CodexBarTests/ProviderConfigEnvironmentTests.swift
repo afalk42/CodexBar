@@ -52,6 +52,46 @@ struct ProviderConfigEnvironmentTests {
     }
 
     @Test
+    func `bedrock config overrides all credential fields`() {
+        let config = ProviderConfig(
+            id: .bedrock,
+            apiKey: "config-access",
+            cookieHeader: "config-secret",
+            region: "us-west-2")
+        let env = ProviderConfigEnvironment.applyAPIKeyOverride(
+            base: [
+                BedrockSettingsReader.accessKeyIDKey: "env-access",
+                BedrockSettingsReader.secretAccessKeyKey: "env-secret",
+                BedrockSettingsReader.regionKeys[0]: "us-east-1",
+            ],
+            provider: .bedrock,
+            config: config)
+
+        #expect(env[BedrockSettingsReader.accessKeyIDKey] == "config-access")
+        #expect(env[BedrockSettingsReader.secretAccessKeyKey] == "config-secret")
+        #expect(env[BedrockSettingsReader.regionKeys[0]] == "us-west-2")
+        #expect(BedrockSettingsReader.hasCredentials(environment: env))
+    }
+
+    @Test
+    func `bedrock config merges secret and region without access key`() {
+        let config = ProviderConfig(
+            id: .bedrock,
+            apiKey: nil,
+            cookieHeader: "config-secret",
+            region: "eu-central-1")
+        let env = ProviderConfigEnvironment.applyAPIKeyOverride(
+            base: [BedrockSettingsReader.accessKeyIDKey: "env-access"],
+            provider: .bedrock,
+            config: config)
+
+        #expect(env[BedrockSettingsReader.accessKeyIDKey] == "env-access")
+        #expect(env[BedrockSettingsReader.secretAccessKeyKey] == "config-secret")
+        #expect(BedrockSettingsReader.region(environment: env) == "eu-central-1")
+        #expect(BedrockSettingsReader.hasCredentials(environment: env))
+    }
+
+    @Test
     func `ignores legacy API key override for deepseek`() {
         let config = ProviderConfig(id: .deepseek, apiKey: "ds-token")
         let env = ProviderConfigEnvironment.applyAPIKeyOverride(

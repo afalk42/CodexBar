@@ -14,8 +14,7 @@ extension SettingsStore {
 
     var bedrockSecretAccessKey: String {
         get {
-            let raw = self.configSnapshot.providerConfig(for: .bedrock)?.sanitizedCookieHeader ?? ""
-            return raw
+            self.configSnapshot.providerConfig(for: .bedrock)?.sanitizedCookieHeader ?? ""
         }
         set {
             self.updateProviderConfig(provider: .bedrock) { entry in

@@ -64,7 +64,8 @@ struct MistralUsageParserTests {
         #expect(snapshot.startDate != nil)
         #expect(snapshot.endDate != nil)
 
-        let calendar = Calendar.current
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
         if let start = snapshot.startDate {
             #expect(calendar.component(.month, from: start) == 11)
             #expect(calendar.component(.year, from: start) == 2025)

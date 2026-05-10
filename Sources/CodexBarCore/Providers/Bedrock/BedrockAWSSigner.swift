@@ -172,7 +172,7 @@ enum BedrockAWSSigner {
 
     private static func uriEncodePath(_ path: String) -> String {
         path.split(separator: "/", omittingEmptySubsequences: false)
-            .map { Self.uriEncode(String($0)) }
+            .map { self.uriEncode(String($0)) }
             .joined(separator: "/")
     }
 }

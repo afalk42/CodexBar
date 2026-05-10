@@ -289,6 +289,50 @@ struct BedrockUsageStatsTests {
         }
     }
 
+    @Test
+    func `cost usage fetcher uses provided bedrock environment`() async throws {
+        let registered = URLProtocol.registerClass(BedrockStubURLProtocol.self)
+        defer {
+            if registered {
+                URLProtocol.unregisterClass(BedrockStubURLProtocol.self)
+            }
+            BedrockStubURLProtocol.handler = nil
+        }
+
+        BedrockStubURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            let body = """
+            {
+                "ResultsByTime": [
+                    {
+                        "TimePeriod": {"Start": "2026-04-10", "End": "2026-04-11"},
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon Bedrock"],
+                                "Metrics": {"UnblendedCost": {"Amount": "7.25", "Unit": "USD"}}
+                            }
+                        ]
+                    }
+                ]
+            }
+            """
+            return Self.makeResponse(url: url, body: body, statusCode: 200)
+        }
+
+        let snapshot = try await CostUsageFetcher().loadTokenSnapshot(
+            provider: .bedrock,
+            environment: [
+                BedrockSettingsReader.accessKeyIDKey: "AKIATEST",
+                BedrockSettingsReader.secretAccessKeyKey: "testSecret",
+                BedrockSettingsReader.apiURLKey: "https://bedrock.test",
+            ],
+            now: Date(timeIntervalSince1970: 1_765_324_800))
+
+        #expect(snapshot.last30DaysCostUSD == 7.25)
+        #expect(snapshot.sessionCostUSD == 7.25)
+        #expect(snapshot.daily.map(\.date) == ["2026-04-10"])
+    }
+
     private static func makeResponse(
         url: URL,
         body: String,
