@@ -135,10 +135,12 @@ generate_widget_appintents_metadata() {
   toolchain_dir=$(dirname "$(dirname "$(dirname "$swiftc_path")")")
   xcode_version=$(xcodebuild -version | awk '/Build version/ { print $3 }')
 
-  rm -rf "$derived_dir"
+  if [[ "${CODEXBAR_FORCE_CLEAN:-0}" == "1" ]]; then
+    rm -rf "$derived_dir"
+  fi
   mkdir -p "$derived_dir"
   local xcodebuild_log="$derived_dir/xcodebuild.log"
-  local timeout_seconds="${CODEXBAR_WIDGET_METADATA_TIMEOUT_SECONDS:-60}"
+  local timeout_seconds="${CODEXBAR_WIDGET_METADATA_TIMEOUT_SECONDS:-600}"
   xcodebuild \
     -workspace "$ROOT/.swiftpm/xcode/package.xcworkspace" \
     -scheme CodexBarWidget \

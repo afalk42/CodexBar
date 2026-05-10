@@ -127,13 +127,19 @@ extension UsageStore {
             {
                 return
             }
+            guard let message = self.userFacingProviderErrorMessage(error) else {
+                await MainActor.run {
+                    self.errors[provider] = nil
+                }
+                return
+            }
             await MainActor.run {
                 let hadPriorData = self.snapshots[provider] != nil
                 let shouldSurface =
                     self.failureGates[provider]?
                         .shouldSurfaceError(onFailureWithPriorData: hadPriorData) ?? true
                 if shouldSurface {
-                    self.errors[provider] = error.localizedDescription
+                    self.errors[provider] = message
                     self.snapshots.removeValue(forKey: provider)
                 } else {
                     self.errors[provider] = nil

@@ -1387,7 +1387,10 @@ extension UsageStore {
             self.tokenFailureGates[provider]?.recordSuccess()
             self.persistWidgetSnapshot(reason: "token-usage")
         } catch {
-            if error is CancellationError { return }
+            if Self.isCancellationLikeError(error) {
+                self.lastTokenFetchAt.removeValue(forKey: provider)
+                return
+            }
             let duration = Date().timeIntervalSince(startedAt)
             let msg = error.localizedDescription
             let durationText = String(format: "%.2f", duration)

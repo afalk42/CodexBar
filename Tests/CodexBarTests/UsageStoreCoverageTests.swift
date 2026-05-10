@@ -395,7 +395,46 @@ struct UsageStoreCoverageTests {
         let store = Self.makeUsageStore(settings: settings)
 
         #expect(store.tokenAccountErrorMessage(CancellationError()) == nil)
+        #expect(store.tokenAccountErrorMessage(URLError(.cancelled)) == nil)
+        #expect(store.tokenAccountErrorMessage(CodexOAuthFetchError.networkError(URLError(.cancelled))) == nil)
         #expect(store.tokenAccountErrorMessage(ProviderFetchError.noAvailableStrategy(.copilot)) != nil)
+    }
+
+    @Test
+    func `provider error message ignores wrapped cancellation`() {
+        let settings = Self.makeSettingsStore(suite: "UsageStoreCoverageTests-provider-cancel-message")
+        let store = Self.makeUsageStore(settings: settings)
+
+        #expect(store.userFacingProviderErrorMessage(CancellationError()) == nil)
+        #expect(store.userFacingProviderErrorMessage(URLError(.cancelled)) == nil)
+        #expect(store.userFacingProviderErrorMessage(CodexOAuthFetchError.networkError(URLError(.cancelled))) == nil)
+        #expect(store
+            .userFacingProviderErrorMessage(ClaudeWebAPIFetcher.FetchError.networkError(URLError(.cancelled))) == nil)
+        #expect(store.userFacingProviderErrorMessage(CursorStatusProbeError.networkError("cancelled")) == nil)
+        #expect(store.userFacingProviderErrorMessage(URLError(.timedOut)) != nil)
+    }
+
+    @Test
+    func `provider refresh cancellation preserves last good snapshot`() async throws {
+        let settings = Self.makeSettingsStore(suite: "UsageStoreCoverageTests-provider-cancel-preserve")
+        settings.refreshFrequency = .manual
+        let metadata = try #require(ProviderRegistry.shared.metadata[.codex])
+        settings.setProviderEnabled(provider: .codex, metadata: metadata, enabled: true)
+        let store = Self.makeUsageStore(settings: settings)
+        let priorSnapshot = UsageSnapshot(
+            primary: RateWindow(usedPercent: 42, windowMinutes: nil, resetsAt: nil, resetDescription: nil),
+            secondary: nil,
+            updatedAt: Date())
+        store._setSnapshotForTesting(priorSnapshot, provider: .codex)
+        store._setErrorForTesting("old error", provider: .codex)
+        Self.installCodexProvider(
+            on: store,
+            error: CodexOAuthFetchError.networkError(URLError(.cancelled)))
+
+        await store.refreshProvider(.codex)
+
+        #expect(store.snapshots[.codex]?.primary?.usedPercent == 42)
+        #expect(store.errors[.codex] == nil)
     }
 
     private static func makeSettingsStore(
@@ -434,6 +473,50 @@ struct UsageStoreCoverageTests {
             browserDetection: BrowserDetection(cacheTTL: 0),
             settings: settings,
             environmentBase: [:])
+    }
+
+    private static func installCodexProvider(on store: UsageStore, error: any Error) {
+        let baseSpec = store.providerSpecs[.codex]!
+        let baseDescriptor = baseSpec.descriptor
+        let strategy = UsageStoreCoverageThrowingFetchStrategy(error: error)
+        let descriptor = ProviderDescriptor(
+            id: .codex,
+            metadata: baseDescriptor.metadata,
+            branding: baseDescriptor.branding,
+            tokenCost: baseDescriptor.tokenCost,
+            fetchPlan: ProviderFetchPlan(
+                sourceModes: [.auto, .oauth],
+                pipeline: ProviderFetchPipeline { _ in [strategy] }),
+            cli: baseDescriptor.cli)
+        store.providerSpecs[.codex] = ProviderSpec(
+            style: baseSpec.style,
+            isEnabled: baseSpec.isEnabled,
+            descriptor: descriptor,
+            makeFetchContext: baseSpec.makeFetchContext)
+    }
+}
+
+private struct UsageStoreCoverageThrowingFetchStrategy: ProviderFetchStrategy {
+    let error: any Error
+
+    var id: String {
+        "usage-store-coverage-throwing"
+    }
+
+    var kind: ProviderFetchKind {
+        .oauth
+    }
+
+    func isAvailable(_: ProviderFetchContext) async -> Bool {
+        true
+    }
+
+    func fetch(_: ProviderFetchContext) async throws -> ProviderFetchResult {
+        throw self.error
+    }
+
+    func shouldFallback(on _: any Error, context _: ProviderFetchContext) -> Bool {
+        false
     }
 }
 

@@ -101,7 +101,7 @@ extension UsageStore {
     }
 
     private static func outcomeIsCancellation(_ outcome: ProviderFetchOutcome) -> Bool {
-        if case let .failure(error) = outcome.result, error is CancellationError {
+        if case let .failure(error) = outcome.result, self.isCancellationLikeError(error) {
             return true
         }
         return false
@@ -169,7 +169,7 @@ extension UsageStore {
     }
 
     func tokenAccountErrorMessage(_ error: any Error) -> String? {
-        guard !(error is CancellationError) else { return nil }
+        guard !Self.isCancellationLikeError(error) else { return nil }
         let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         return message.isEmpty ? nil : message
     }
@@ -179,7 +179,7 @@ extension UsageStore {
     /// silently fall back to the live (selected-account) snapshot when an
     /// individual account refresh is cancelled.
     func tokenAccountSnapshotErrorMessage(_ error: any Error) -> String {
-        if error is CancellationError {
+        if Self.isCancellationLikeError(error) {
             return "Refresh cancelled"
         }
         let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -221,7 +221,7 @@ extension UsageStore {
             // Preserve the last-good snapshot when the refresh was cancelled (e.g. the
             // user switched menu tabs mid-flight). Without this the per-account list
             // would briefly render error chips for accounts that already had data.
-            if error is CancellationError {
+            if Self.isCancellationLikeError(error) {
                 if let priorSnapshot, priorSnapshot.snapshot != nil {
                     return ResolvedAccountOutcome(snapshot: priorSnapshot, usage: priorSnapshot.snapshot)
                 }
