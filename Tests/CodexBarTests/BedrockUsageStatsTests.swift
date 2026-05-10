@@ -124,6 +124,73 @@ struct BedrockUsageStatsTests {
     }
 
     @Test
+    func `cost explorer pagination aggregates monthly total`() async throws {
+        let registered = URLProtocol.registerClass(BedrockStubURLProtocol.self)
+        defer {
+            if registered {
+                URLProtocol.unregisterClass(BedrockStubURLProtocol.self)
+            }
+            BedrockStubURLProtocol.handler = nil
+        }
+
+        let responses = BedrockStubResponseQueue([
+            """
+            {
+                "NextPageToken": "page-2",
+                "ResultsByTime": [
+                    {
+                        "TimePeriod": {"Start": "2026-04-01", "End": "2026-04-06"},
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon EC2"],
+                                "Metrics": {"UnblendedCost": {"Amount": "5.00", "Unit": "USD"}}
+                            }
+                        ]
+                    }
+                ]
+            }
+            """,
+            """
+            {
+                "ResultsByTime": [
+                    {
+                        "TimePeriod": {"Start": "2026-04-01", "End": "2026-04-06"},
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon Bedrock"],
+                                "Metrics": {"UnblendedCost": {"Amount": "12.00", "Unit": "USD"}}
+                            },
+                            {
+                                "Keys": ["Claude Sonnet (Bedrock Edition)"],
+                                "Metrics": {"UnblendedCost": {"Amount": "8.00", "Unit": "USD"}}
+                            }
+                        ]
+                    }
+                ]
+            }
+            """,
+        ])
+        BedrockStubURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            return responses.next(url: url)
+        }
+
+        let credentials = BedrockAWSSigner.Credentials(
+            accessKeyID: "AKIATEST",
+            secretAccessKey: "testSecret",
+            sessionToken: nil)
+
+        let usage = try await BedrockUsageFetcher.fetchUsage(
+            credentials: credentials,
+            region: "us-east-1",
+            budget: nil,
+            environment: [BedrockSettingsReader.apiURLKey: "https://bedrock.test"])
+
+        #expect(usage.monthlySpend == 20)
+        #expect(responses.remainingCount == 0)
+    }
+
+    @Test
     func `cost usage fetcher uses provided bedrock environment`() async throws {
         let registered = URLProtocol.registerClass(BedrockStubURLProtocol.self)
         defer {
@@ -133,9 +200,24 @@ struct BedrockUsageStatsTests {
             BedrockStubURLProtocol.handler = nil
         }
 
-        BedrockStubURLProtocol.handler = { request in
-            guard let url = request.url else { throw URLError(.badURL) }
-            let body = """
+        let responses = BedrockStubResponseQueue([
+            """
+            {
+                "NextPageToken": "daily-page-2",
+                "ResultsByTime": [
+                    {
+                        "TimePeriod": {"Start": "2025-12-10", "End": "2025-12-11"},
+                        "Groups": [
+                            {
+                                "Keys": ["Amazon EC2"],
+                                "Metrics": {"UnblendedCost": {"Amount": "5.00", "Unit": "USD"}}
+                            }
+                        ]
+                    }
+                ]
+            }
+            """,
+            """
             {
                 "ResultsByTime": [
                     {
@@ -149,8 +231,11 @@ struct BedrockUsageStatsTests {
                     }
                 ]
             }
-            """
-            return Self.makeResponse(url: url, body: body, statusCode: 200)
+            """,
+        ])
+        BedrockStubURLProtocol.handler = { request in
+            guard let url = request.url else { throw URLError(.badURL) }
+            return responses.next(url: url)
         }
 
         let snapshot = try await CostUsageFetcher().loadTokenSnapshot(
@@ -165,6 +250,50 @@ struct BedrockUsageStatsTests {
         #expect(snapshot.last30DaysCostUSD == 7.25)
         #expect(snapshot.sessionCostUSD == 7.25)
         #expect(snapshot.daily.map(\.date) == ["2025-12-10"])
+        #expect(responses.remainingCount == 0)
+    }
+
+    @Test
+    func `current month range uses UTC calendar`() throws {
+        let originalTimeZone = NSTimeZone.default
+        NSTimeZone.default = TimeZone(secondsFromGMT: 14 * 60 * 60)!
+        defer {
+            NSTimeZone.default = originalTimeZone
+        }
+
+        let now = try #require(ISO8601DateFormatter().date(from: "2026-05-10T12:00:00Z"))
+        let range = BedrockUsageFetcher.currentMonthRange(now: now)
+
+        #expect(range.start == "2026-05-01")
+        #expect(range.end == "2026-05-11")
+    }
+
+    private final class BedrockStubResponseQueue {
+        private let lock = NSLock()
+        private var bodies: [String]
+
+        init(_ bodies: [String]) {
+            self.bodies = bodies
+        }
+
+        var remainingCount: Int {
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            return self.bodies.count
+        }
+
+        func next(url: URL) -> (HTTPURLResponse, Data) {
+            self.lock.lock()
+            let body = self.bodies.isEmpty ? #"{"ResultsByTime":[]}"# : self.bodies.removeFirst()
+            self.lock.unlock()
+
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"])!
+            return (response, Data(body.utf8))
+        }
     }
 
     private static func makeResponse(

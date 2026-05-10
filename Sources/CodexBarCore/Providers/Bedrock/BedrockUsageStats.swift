@@ -104,6 +104,13 @@ enum BedrockUsageFetcher {
     private static let log = CodexBarLog.logger(LogCategories.bedrockUsage)
     private static let requestTimeoutSeconds: TimeInterval = 15
 
+    private struct CostExplorerQuery {
+        let startDate: String
+        let endDate: String
+        let granularity: String
+        let nextPageToken: String?
+    }
+
     static func fetchUsage(
         credentials: BedrockAWSSigner.Credentials,
         region: String,
@@ -133,17 +140,17 @@ enum BedrockUsageFetcher {
     {
         let formatter = Self.dateFormatter()
         let startDate = formatter.string(from: since)
-        let inclusiveEnd = Calendar.current.date(byAdding: .day, value: 1, to: until) ?? until
+        let inclusiveEnd = Self.utcCalendar().date(byAdding: .day, value: 1, to: until) ?? until
         let endDate = formatter.string(from: inclusiveEnd)
 
-        let data = try await Self.callCostExplorer(
+        let pages = try await Self.callCostExplorerPages(
             startDate: startDate,
             endDate: endDate,
             granularity: "DAILY",
             credentials: credentials,
             environment: environment)
 
-        let entries = try Self.parseDailyResponse(data)
+        let entries = try Self.parseDailyResponses(pages)
         return CostUsageDailyReport(data: entries, summary: nil)
     }
 
@@ -153,20 +160,48 @@ enum BedrockUsageFetcher {
     {
         let (startDate, endDate) = Self.currentMonthRange()
 
-        let data = try await Self.callCostExplorer(
+        let pages = try await Self.callCostExplorerPages(
             startDate: startDate,
             endDate: endDate,
             granularity: "MONTHLY",
             credentials: credentials,
             environment: environment)
 
-        return try Self.parseTotalCost(data)
+        return try Self.parseTotalCost(pages)
     }
 
-    private static func callCostExplorer(
+    private static func callCostExplorerPages(
         startDate: String,
         endDate: String,
         granularity: String,
+        credentials: BedrockAWSSigner.Credentials,
+        environment: [String: String]) async throws -> [Data]
+    {
+        var pages: [Data] = []
+        var nextPageToken: String?
+        var seenPageTokens: Set<String> = []
+
+        repeat {
+            let page = try await Self.callCostExplorerPage(
+                query: CostExplorerQuery(
+                    startDate: startDate,
+                    endDate: endDate,
+                    granularity: granularity,
+                    nextPageToken: nextPageToken),
+                credentials: credentials,
+                environment: environment)
+            pages.append(page)
+            nextPageToken = try Self.nextPageToken(from: page)
+            if let nextPageToken, !seenPageTokens.insert(nextPageToken).inserted {
+                throw BedrockUsageError.parseFailed("Cost Explorer returned repeated NextPageToken")
+            }
+        } while nextPageToken != nil
+
+        return pages
+    }
+
+    private static func callCostExplorerPage(
+        query: CostExplorerQuery,
         credentials: BedrockAWSSigner.Credentials,
         environment: [String: String]) async throws -> Data
     {
@@ -179,17 +214,20 @@ enum BedrockUsageFetcher {
             URL(string: "https://ce.\(ceRegion).amazonaws.com")!
         }
 
-        let requestBody: [String: Any] = [
+        var requestBody: [String: Any] = [
             "TimePeriod": [
-                "Start": startDate,
-                "End": endDate,
+                "Start": query.startDate,
+                "End": query.endDate,
             ],
-            "Granularity": granularity,
+            "Granularity": query.granularity,
             "Metrics": ["UnblendedCost"],
             "GroupBy": [
                 ["Type": "DIMENSION", "Key": "SERVICE"],
             ],
         ]
+        if let nextPageToken = query.nextPageToken {
+            requestBody["NextPageToken"] = nextPageToken
+        }
 
         let bodyData = try JSONSerialization.data(withJSONObject: requestBody)
 
@@ -223,12 +261,34 @@ enum BedrockUsageFetcher {
         return data
     }
 
+    private static func nextPageToken(from data: Data) throws -> String? {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw BedrockUsageError.parseFailed("Invalid Cost Explorer response")
+        }
+        return BedrockSettingsReader.cleaned(json["NextPageToken"] as? String)
+    }
+
+    private static func parseTotalCost(_ pages: [Data]) throws -> Double {
+        var total = 0.0
+        for page in pages {
+            total += try Self.parseTotalCost(page)
+        }
+        return total
+    }
+
     private static func parseTotalCost(_ data: Data) throws -> Double {
         var total = 0.0
         for (_, cost, _) in try Self.parseGroupedResults(data) {
             total += cost
         }
         return total
+    }
+
+    private static func parseDailyResponses(_ pages: [Data]) throws -> [CostUsageDailyReport.Entry] {
+        let reports = try pages.map { page in
+            try CostUsageDailyReport(data: Self.parseDailyResponse(page), summary: nil)
+        }
+        return CostUsageDailyReport.merged(reports).data
     }
 
     private static func parseDailyResponse(_ data: Data) throws -> [CostUsageDailyReport.Entry] {
@@ -322,14 +382,20 @@ enum BedrockUsageFetcher {
         return formatter
     }
 
-    private static func currentMonthRange() -> (start: String, end: String) {
-        let calendar = Calendar.current
-        let now = Date()
+    private static func utcCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    static func currentMonthRange(now: Date = Date()) -> (start: String, end: String) {
+        let calendar = Self.utcCalendar()
         let components = calendar.dateComponents([.year, .month], from: now)
         let startOfMonth = calendar.date(from: components)!
 
         let formatter = Self.dateFormatter()
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)!
+        let startOfToday = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday)!
         return (formatter.string(from: startOfMonth), formatter.string(from: tomorrow))
     }
 
