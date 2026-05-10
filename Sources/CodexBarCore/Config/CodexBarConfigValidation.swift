@@ -125,6 +125,8 @@ public enum CodexBarConfigValidator {
                 message: "cookieSource manual is set but cookieHeader is missing for \(provider.rawValue)."))
         }
 
+        self.validateSecretKey(entry, issues: &issues)
+
         if let region = entry.region, !region.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             switch provider {
             case .minimax:
@@ -163,6 +165,8 @@ public enum CodexBarConfigValidator {
                         code: "invalid_region",
                         message: "Region \(region) is not a valid Moonshot region."))
                 }
+            case .bedrock:
+                break
             default:
                 issues.append(CodexBarConfigIssue(
                     severity: .warning,
@@ -208,5 +212,21 @@ public enum CodexBarConfigValidator {
                 code: "token_accounts_unused",
                 message: "tokenAccounts are set but \(provider.rawValue) does not support token accounts."))
         }
+    }
+
+    private static func validateSecretKey(_ entry: ProviderConfig, issues: inout [CodexBarConfigIssue]) {
+        guard let secretKey = entry.secretKey,
+              !secretKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              entry.id != .bedrock
+        else {
+            return
+        }
+
+        issues.append(CodexBarConfigIssue(
+            severity: .warning,
+            provider: entry.id,
+            field: "secretKey",
+            code: "secret_key_unused",
+            message: "secretKey is set but only bedrock uses secretKey."))
     }
 }
